@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+#root {
+  min-height: 100vh;
+}
+
+/* ---------------- Theme tokens ---------------- */
+:root {
+  --bg: #f0f4f9;
+  --bg-deep: #e8edf5;
+  --surface: #ffffff;
+  --surface-2: rgba(255, 255, 255, 0.65);
+  --text: #1f1f1f;
+  --text-2: #5f6368;
+  --text-3: #9aa0a6;
+  --line: #dde3ec;
+  --card-shadow: 0 1px 4px rgba(31, 31, 31, 0.06);
+  --orb-opacity: 0.14;
+  --ladder-reached: #7d86d9;
+}
+
+[data-theme='dark'] {
+  --bg: #131314;
+  --bg-deep: #0b0b0c;
+  --surface: #1e1f20;
+  --surface-2: rgba(30, 31, 32, 0.72);
+  --text: #e3e3e3;
+  --text-2: #9aa0a6;
+  --text-3: #6f7479;
+  --line: #333537;
+  --card-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  --orb-opacity: 0.22;
+  --ladder-reached: #8f9bd9;
+}
+
+.theme-fade,
+.theme-fade * {
+  transition: background-color 0.45s ease, color 0.45s ease, border-color 0.45s ease, box-shadow 0.45s ease;
+}
+
+/* Gemini sparkle gradient signature */
+.gemini-gradient {
+  background: linear-gradient(
+    to right,
+    #4796e3 10%,
+    #9177c7 40%,
+    #d96570 70%,
+    #4796e3 100%
+  );
+  background-size: 300% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: textShine 8s ease-in-out infinite alternate;
+}
+
+@keyframes textShine {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+
+/* Ambient gradient orbs — the iOS Gemini glow */
+.orb {
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(70px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: var(--orb-opacity);
+  background: linear-gradient(270deg, #4796e3, #9177c7, #d96570, #4796e3);
+  background-size: 1000% 1000%;
+  animation: orbCycle 30s ease infinite;
+  transition: opacity 0.45s ease;
+}
+
+@keyframes orbCycle {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Sparkle breathing */
+@keyframes breathe {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  50% { transform: scale(1.12) rotate(8deg); opacity: 0.85; }
+}
+.sparkle-breathe {
+  animation: breathe 6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Card hover lift */
+.project-card {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.45s ease;
+}
+.project-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px -12px rgba(145, 119, 199, 0.28), 0 4px 12px -4px rgba(71, 150, 227, 0.14);
+}
+
+/* Command bar focus glow */
+.command-bar {
+  transition: box-shadow 0.4s ease, background-color 0.45s ease;
+}
+.command-bar:focus-within {
+  box-shadow:
+    0 0 0 2px rgba(145, 119, 199, 0.4),
+    0 8px 32px -8px rgba(145, 119, 199, 0.35),
+    0 2px 8px -2px rgba(71, 150, 227, 0.18);
+}
+
+/* Live pulse */
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 168, 83, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(52, 168, 83, 0); }
+}
+.live-pulse {
+  animation: livePulse 2.4s ease-in-out infinite;
+}
+
+/* Sync pulse while fetching live state */
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.sync-pulse {
+  animation: syncPulse 1.6s ease-in-out infinite;
+}
+
+/* Chip hover */
+.chip {
+  transition: all 0.25s ease;
+}
+.chip:hover {
+  background: linear-gradient(to right, rgba(71,150,227,0.1), rgba(145,119,199,0.1), rgba(217,101,112,0.1));
+  border-color: rgba(145, 119, 199, 0.45);
+}
+
+/* Theme toggle track */
+.toggle-track {
+  transition: background 0.35s ease;
+}
+.toggle-thumb {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), background 0.35s ease;
+}
+
+html {
+  scroll-behavior: smooth;
+}
