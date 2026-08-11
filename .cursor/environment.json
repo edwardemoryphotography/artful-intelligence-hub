@@ -1,0 +1,11 @@
+{
+  "name": "Artful Intelligence Hub",
+  "install": "npm ci",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev -- --host"
+    }
+  ],
+  "ports": [3000]
+}
