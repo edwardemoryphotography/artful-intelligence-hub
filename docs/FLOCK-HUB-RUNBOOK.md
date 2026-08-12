@@ -135,6 +135,25 @@ can reach the project (see the checklist below).
 
 ---
 
+## 8. The command bar has two brains. Do not disable the one that works.
+
+`flock-ask` is owner-gated, not deployed from this sandbox, and needs secrets.
+A command bar that is a no-op until sign-in is a dead surface for almost every
+visitor — including the agent verifying the hub.
+
+`src/lib/localAsk.ts` restates what is already on screen (ladder entries,
+aggregates, declared identity). It is not a second source of truth and must
+never promote a declared stage into a measurement. Chips are generated from
+the current reading (`adaptiveChips`); static prompt starters pretend the
+flock is always in the same state.
+
+Unsigned visitors get a local reading immediately. An owner session may
+additionally call flock-ask; if that function 401s or 503s, the local reading
+stands and the UI says so. Route writes still cannot happen in the browser
+(§2).
+
+---
+
 ## Deployment checklist (run from a machine that can reach Supabase)
 
 Nothing below has been executed. Each step ends with the evidence that would
