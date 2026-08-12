@@ -89,9 +89,11 @@
   transform-origin: center;
 }
 
-/* Card hover lift */
+/* Card hover lift + staggered entrance */
 .project-card {
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.45s ease;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.45s ease, opacity 0.3s ease;
+  animation: cardIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
 }
 .project-card:hover {
   transform: translateY(-4px);
@@ -134,6 +136,77 @@
 .chip:hover {
   background: linear-gradient(to right, rgba(71,150,227,0.1), rgba(145,119,199,0.1), rgba(217,101,112,0.1));
   border-color: rgba(145, 119, 199, 0.45);
+}
+
+/* Pointer-follow glow — Gemini-like, decorative only */
+.pointer-orb {
+  position: fixed;
+  width: 280px;
+  height: 280px;
+  left: var(--pointer-x, 50%);
+  top: var(--pointer-y, 20%);
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: calc(var(--orb-opacity) * 0.7);
+  background: radial-gradient(circle, rgba(145, 119, 199, 0.45), rgba(71, 150, 227, 0.12) 55%, transparent 70%);
+  filter: blur(24px);
+  transition: opacity 0.45s ease;
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.project-card.is-selected {
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--card-hue, #9177c7) 55%, transparent),
+    0 12px 40px -12px rgba(145, 119, 199, 0.32);
+  transform: translateY(-2px);
+}
+.project-card.is-mentioned:not(.is-selected) {
+  box-shadow: 0 0 0 1px rgba(145, 119, 199, 0.35);
+}
+.project-card.is-dimmed {
+  opacity: 0.48;
+}
+.project-card.is-dimmed:hover,
+.project-card.is-dimmed:focus-within {
+  opacity: 1;
+}
+
+.filter-chip {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+.answer-in {
+  animation: answerIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes answerIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-fade,
+  .theme-fade *,
+  .gemini-gradient,
+  .orb,
+  .sparkle-breathe,
+  .project-card,
+  .live-pulse,
+  .sync-pulse,
+  .pointer-orb,
+  .answer-in,
+  .toggle-thumb {
+    animation: none !important;
+    transition: none !important;
+  }
+  .pointer-orb {
+    display: none;
+  }
 }
 
 /* Theme toggle track */

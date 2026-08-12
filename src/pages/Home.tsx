@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import '../App.css'
 import { useOwnerSession } from '../hooks/useOwnerSession'
 import { useConstellation } from '../hooks/useConstellation'
@@ -9,18 +9,13 @@ import {
   type LadderEntry,
   type TruthStage,
 } from '../lib/ladder'
-
-/* ------------------------------------------------------------------ */
-/* Doctrine                                                             */
-/* ------------------------------------------------------------------ */
-
-/** The chips are prompt starters, not decoration — each is a real question. */
-const CHIPS = [
-  'Which territories are Live on evidence, not assertion?',
-  'What would it take to promote Foundry Console to Live?',
-  'What is the control plane telling us that the ladder is not?',
-  'Route a task to the flock',
-]
+import {
+  adaptiveChips,
+  askLocal,
+  flockSummary,
+  mentionedTerritory,
+  type LocalAskResult,
+} from '../lib/localAsk'
 
 const DOCTRINES = [
   {
@@ -33,6 +28,15 @@ const DOCTRINES = [
     name: 'The Recursion',
   },
   { quote: 'The deployment is innocent only after verification.', name: 'Fear-Based DevOps' },
+]
+
+type LadderFilter = 'all' | 'measured' | 'declared' | 'live'
+
+const FILTERS: { id: LadderFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'live', label: 'Live on evidence' },
+  { id: 'measured', label: 'Measured' },
+  { id: 'declared', label: 'Declared-only' },
 ]
 
 /* ------------------------------------------------------------------ */
@@ -62,8 +66,6 @@ function TruthLadder({ stage, muted }: { stage: TruthStage; muted: boolean }) {
     <div className="flex items-center gap-1.5" title={`Truth ladder: ${TRUTH_LADDER[stage]}`}>
       {TRUTH_LADDER.map((label, i) => {
         const reached = i <= stage
-        // Only an evidence-backed Live pulses. A declared Live sits still —
-        // the animation is reserved for something we actually measured.
         const isLive = stage === 3 && i === 3 && !muted
         return (
           <div key={label} className="flex items-center gap-1.5">
@@ -128,12 +130,20 @@ export default function Home() {
   })
   const [query, setQuery] = useState('')
   const [asking, setAsking] = useState(false)
-  const [answer, setAnswer] = useState<FlockAnswer | null>(null)
+  const [localAnswer, setLocalAnswer] = useState<LocalAskResult | null>(null)
+  const [flockAnswer, setFlockAnswer] = useState<FlockAnswer | null>(null)
+  const [flockPending, setFlockPending] = useState(false)
+  const [flockNotice, setFlockNotice] = useState<string | null>(null)
   const [askError, setAskError] = useState<string | null>(null)
   const [routeState, setRouteState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [routeError, setRouteError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [showSignIn, setShowSignIn] = useState(false)
+  const [selectedTerritory, setSelectedTerritory] = useState<string | null>(null)
+  const [filter, setFilter] = useState<LadderFilter>('all')
+  const [showLocalReading, setShowLocalReading] = useState(false)
+
+  const commandRef = useRef<HTMLInputElement>(null)
 
   const owner = useOwnerSession()
   const constellation = useConstellation(Boolean(owner.session))
@@ -143,27 +153,140 @@ export default function Home() {
     localStorage.setItem('flock-theme', theme)
   }, [theme])
 
+  useEffect(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) return
+    const onMove = (event: PointerEvent) => {
+      document.documentElement.style.setProperty('--pointer-x', `${event.clientX}px`)
+      document.documentElement.style.setProperty('--pointer-y', `${event.clientY}px`)
+    }
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target
+      const tag = target instanceof HTMLElement ? target.tagName : ''
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA'
+      if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault()
+        commandRef.current?.focus()
+      }
+      if (event.key === 'Escape') {
+        setSelectedTerritory(null)
+        setShowSignIn(false)
+        if (typing) commandRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const liveCount = constellation.ladder.filter((e) => e.stage === 3 && e.basis === 'rule').length
 
-  async function handleAsk() {
-    const question = query.trim()
-    if (!question || asking) return
-    setAsking(true)
-    setAskError(null)
-    setAnswer(null)
-    setRouteState('idle')
-    setRouteError(null)
-    const result = await askFlock(question)
-    if (result.ok) setAnswer(result.data)
-    else setAskError(result.message)
-    setAsking(false)
-  }
+  const chips = useMemo(
+    () =>
+      adaptiveChips({
+        ladder: constellation.ladder,
+        status: constellation.status,
+        ladderSource: constellation.ladderSource,
+        notice: constellation.notice,
+        sync: constellation.sync,
+      }),
+    [
+      constellation.ladder,
+      constellation.status,
+      constellation.ladderSource,
+      constellation.notice,
+      constellation.sync,
+    ],
+  )
+
+  const summary = useMemo(
+    () =>
+      flockSummary({
+        ladder: constellation.ladder,
+        status: constellation.status,
+        ladderSource: constellation.ladderSource,
+        notice: constellation.notice,
+        sync: constellation.sync,
+      }),
+    [
+      constellation.ladder,
+      constellation.status,
+      constellation.ladderSource,
+      constellation.notice,
+      constellation.sync,
+    ],
+  )
+
+  const typedTerritory = mentionedTerritory(query)
+
+  const visibleTerritories = useMemo(() => {
+    return TERRITORIES.filter((t) => {
+      if (selectedTerritory === t.name) return true
+      const entry = constellation.ladderByTerritory.get(t.name)
+      const basis = entry?.basis ?? 'declared'
+      const stage = entry?.stage ?? t.declaredStage
+      if (filter === 'measured') return basis === 'rule'
+      if (filter === 'declared') return basis === 'declared'
+      if (filter === 'live') return basis === 'rule' && stage === 3
+      return true
+    })
+  }, [constellation.ladderByTerritory, filter, selectedTerritory])
+
+  const handleAsk = useCallback(
+    async (raw?: string) => {
+      const question = (raw ?? query).trim()
+      if (!question || asking) return
+      setQuery(question)
+      setAsking(true)
+      setAskError(null)
+      setFlockAnswer(null)
+      setFlockNotice(null)
+      setRouteState('idle')
+      setRouteError(null)
+      setShowLocalReading(false)
+
+      const local = askLocal({
+        question,
+        ladder: constellation.ladder,
+        status: constellation.status,
+        ladderSource: constellation.ladderSource,
+        notice: constellation.notice,
+        sync: constellation.sync,
+        signedIn: Boolean(owner.session),
+      })
+      setLocalAnswer(local)
+      if (local.focusTerritory) setSelectedTerritory(local.focusTerritory)
+
+      if (owner.session) {
+        setFlockPending(true)
+        const result = await askFlock(question)
+        if (result.ok) setFlockAnswer(result.data)
+        else setFlockNotice(result.message)
+        setFlockPending(false)
+      }
+      setAsking(false)
+    },
+    [
+      asking,
+      constellation.ladder,
+      constellation.ladderSource,
+      constellation.notice,
+      constellation.status,
+      constellation.sync,
+      owner.session,
+      query,
+    ],
+  )
 
   async function handleConfirmRoute() {
-    if (!answer?.proposed_route) return
+    if (!flockAnswer?.proposed_route) return
     setRouteState('saving')
     setRouteError(null)
-    const result = await confirmRoute(answer.proposed_route)
+    const result = await confirmRoute(flockAnswer.proposed_route)
     if (result.ok) {
       setRouteState('saved')
       constellation.refresh()
@@ -191,17 +314,18 @@ export default function Home() {
   const syncColor =
     constellation.sync === 'error' ? '#d96570' : constellation.sync === 'degraded' ? '#e8934a' : '#34a853'
 
+  const highlightName = selectedTerritory ?? typedTerritory
+
   return (
     <div
       className="theme-fade relative min-h-screen"
       style={{ background: 'var(--bg)', fontFamily: "'Outfit', 'Google Sans', sans-serif", color: 'var(--text)' }}
     >
-      {/* Ambient orbs */}
       <div className="orb" style={{ width: 520, height: 220, top: -70, left: '6%' }} />
       <div className="orb" style={{ width: 440, height: 190, top: '40%', right: '-5%' }} />
       <div className="orb" style={{ width: 400, height: 170, bottom: -50, left: '20%' }} />
+      <div className="pointer-orb" aria-hidden />
 
-      {/* Nav */}
       <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 pt-7">
         <div className="flex items-center gap-2.5">
           <Sparkle size={26} />
@@ -260,7 +384,6 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Owner sign-in */}
       {showSignIn && !owner.session && (
         <div className="relative z-10 mx-auto mt-4 max-w-md px-6">
           <div
@@ -269,8 +392,8 @@ export default function Home() {
           >
             <p className="text-sm font-semibold tracking-tight">Owner sign-in</p>
             <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-2)' }}>
-              A magic link unlocks the command bar and realtime updates. Read-only
-              aggregates are public and need no session.
+              A magic link unlocks flock-ask and realtime updates. Local readings of the
+              ladder are public and need no session.
             </p>
             <div className="mt-3 flex gap-2">
               <input
@@ -304,7 +427,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Hero */}
       <section className="relative z-10 mx-auto max-w-3xl px-6 pt-20 text-center sm:pt-24">
         <div className="mb-6 flex justify-center">
           <Sparkle size={46} />
@@ -315,46 +437,52 @@ export default function Home() {
           <span style={{ color: 'var(--text)' }}>One home for the whole flock.</span>
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed" style={{ color: 'var(--text-2)' }}>
-          Every project, every agent, every doctrine — unified behind a single command bar,
-          reading the live control plane as it moves.
+          {summary}
         </p>
 
-        {/* Command bar */}
         <div
           className="command-bar mx-auto mt-10 flex items-center gap-3 rounded-[2rem] px-5 py-4"
           style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}
         >
           <Sparkle size={20} className="shrink-0" />
           <input
+            ref={commandRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleAsk()
             }}
-            placeholder={owner.session ? 'Ask the flock anything…' : 'Sign in as owner to ask the flock…'}
+            placeholder={
+              owner.session
+                ? 'Ask the flock anything…'
+                : 'Ask the constellation — local reading, no sign-in needed'
+            }
             className="w-full bg-transparent text-base outline-none"
             style={{ color: 'var(--text)' }}
+            aria-label="Ask the constellation"
           />
           <button
             onClick={() => void handleAsk()}
-            disabled={asking || !owner.session || !query.trim()}
+            disabled={asking || !query.trim()}
             className="shrink-0 rounded-full px-4 py-2 text-sm font-medium text-white transition-transform hover:scale-[1.03] disabled:opacity-50"
             style={{ background: 'linear-gradient(90deg,#4796e3,#9177c7,#d96570)', backgroundSize: '200% auto' }}
           >
             {asking ? 'Thinking…' : 'Send'}
           </button>
         </div>
+        <p className="mt-3 text-[11px] tracking-wide" style={{ color: 'var(--text-3)', fontFamily: MONO }}>
+          / to focus · Enter to send · Esc to clear selection · chips adapt to the ladder
+        </p>
 
-        {/* Chips — real prompt starters */}
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          {CHIPS.map((chip) => (
+          {chips.map((chip) => (
             <button
-              key={chip}
-              onClick={() => setQuery(chip)}
+              key={chip.prompt}
+              onClick={() => void handleAsk(chip.prompt)}
               className="chip rounded-full border px-3.5 py-1.5 text-xs font-medium"
               style={{ borderColor: 'var(--line)', color: 'var(--text-2)', background: 'var(--surface-2)' }}
             >
-              {chip}
+              {chip.label}
             </button>
           ))}
         </div>
@@ -368,51 +496,117 @@ export default function Home() {
           </div>
         )}
 
-        {answer && <AnswerCard
-          answer={answer}
-          routeState={routeState}
-          routeError={routeError}
-          onConfirm={() => void handleConfirmRoute()}
-        />}
+        {localAnswer && !flockAnswer && (
+          <LocalAnswerCard
+            result={localAnswer}
+            pendingFlock={flockPending}
+            flockNotice={flockNotice}
+          />
+        )}
+
+        {flockAnswer && (
+          <>
+            <AnswerCard
+              answer={flockAnswer}
+              routeState={routeState}
+              routeError={routeError}
+              onConfirm={() => void handleConfirmRoute()}
+            />
+            {localAnswer && (
+              <div className="mx-auto mt-3 max-w-2xl text-left">
+                <button
+                  onClick={() => setShowLocalReading((v) => !v)}
+                  className="text-xs font-medium"
+                  style={{ color: 'var(--text-3)' }}
+                >
+                  {showLocalReading ? 'Hide local reading' : 'Show local reading of the ladder'}
+                </button>
+                {showLocalReading && (
+                  <LocalAnswerCard result={localAnswer} pendingFlock={false} flockNotice={null} />
+                )}
+              </div>
+            )}
+          </>
+        )}
       </section>
 
-      {/* Constellation */}
       <section className="relative z-10 mx-auto max-w-6xl px-6 pt-24">
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold tracking-tight">The Constellation</h2>
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-2)' }}>
-            Seven territories. One truth ladder:{' '}
-            <span style={{ fontFamily: MONO, fontSize: 12 }}>Merged ≠ Deployed ≠ Verified ≠ Live</span>
-          </p>
-          <p className="mt-2 text-xs" style={{ color: 'var(--text-3)' }}>
-            <LadderProvenance source={constellation.ladderSource} notice={constellation.notice} />
-          </p>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">The Constellation</h2>
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-2)' }}>
+              Seven territories. One truth ladder:{' '}
+              <span style={{ fontFamily: MONO, fontSize: 12 }}>Merged ≠ Deployed ≠ Verified ≠ Live</span>
+            </p>
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-3)' }}>
+              <LadderProvenance source={constellation.ladderSource} notice={constellation.notice} />
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter territories">
+            {FILTERS.map((item) => (
+              <button
+                key={item.id}
+                role="tab"
+                aria-selected={filter === item.id}
+                onClick={() => setFilter(item.id)}
+                className={`filter-chip rounded-full px-3 py-1.5 text-xs font-medium ${
+                  filter === item.id ? 'is-active' : ''
+                }`}
+                style={{
+                  background: filter === item.id ? 'var(--surface)' : 'var(--surface-2)',
+                  color: filter === item.id ? 'var(--text)' : 'var(--text-2)',
+                  border: `1px solid ${filter === item.id ? 'rgba(145,119,199,0.45)' : 'var(--line)'}`,
+                  boxShadow: filter === item.id ? 'var(--card-shadow)' : 'none',
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {TERRITORIES.map((t) => {
+          {visibleTerritories.map((t, index) => {
             const entry: LadderEntry | undefined = constellation.ladderByTerritory.get(t.name)
             const stage = entry?.stage ?? t.declaredStage
             const declaredOnly = (entry?.basis ?? 'declared') === 'declared'
+            const selected = selectedTerritory === t.name
+            const mentioned = typedTerritory === t.name
+            const dimmed = Boolean(highlightName && highlightName !== t.name)
             return (
               <article
                 key={t.name}
-                className="project-card rounded-3xl p-6"
-                style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}
+                className={`project-card rounded-3xl p-6 ${selected ? 'is-selected' : ''} ${
+                  dimmed ? 'is-dimmed' : ''
+                } ${mentioned && !selected ? 'is-mentioned' : ''}`}
+                style={{
+                  background: 'var(--surface)',
+                  boxShadow: 'var(--card-shadow)',
+                  ['--i' as string]: index,
+                  ['--card-hue' as string]: t.hue,
+                }}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-base"
-                    style={{ background: `${t.hue}18`, color: t.hue }}
-                  >
-                    {t.glyph}
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  onClick={() => setSelectedTerritory((current) => (current === t.name ? null : t.name))}
+                  aria-pressed={selected}
+                  aria-label={`${t.name}, ${declaredOnly ? 'declared' : 'measured'} ${TRUTH_LADDER[stage]}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-base"
+                      style={{ background: `${t.hue}18`, color: t.hue }}
+                    >
+                      {t.glyph}
+                    </div>
+                    <TruthLadder stage={stage} muted={declaredOnly} />
                   </div>
-                  <TruthLadder stage={stage} muted={declaredOnly} />
-                </div>
-                <h3 className="mt-4 text-base font-semibold tracking-tight">{t.name}</h3>
-                <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>
-                  {t.tagline}
-                </p>
+                  <h3 className="mt-4 text-base font-semibold tracking-tight">{t.name}</h3>
+                  <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>
+                    {t.tagline}
+                  </p>
+                </button>
 
                 {entry?.signal ? (
                   <p
@@ -423,37 +617,60 @@ export default function Home() {
                     {entry.signal}
                   </p>
                 ) : (
-                  // No live signal. Say so — never let a declared stage read as
-                  // a measured one.
                   <p className="mt-4 text-xs" style={{ color: 'var(--text-3)', fontFamily: MONO }}>
                     declared only · no control-plane signal wired
                   </p>
+                )}
+
+                {selected && (
+                  <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--line)' }}>
+                    <p className="text-xs leading-relaxed" style={{ color: 'var(--text-2)', fontFamily: MONO }}>
+                      basis {entry?.basis ?? 'declared'} · provenance {entry?.provenance ?? 'unknown'}
+                      {entry?.ruleset_version != null ? ` · ruleset v${entry.ruleset_version}` : ''}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleAsk(`Tell me about ${t.name}`)}
+                      className="chip mt-3 rounded-full border px-3 py-1.5 text-xs font-medium"
+                      style={{ borderColor: 'var(--line)', color: 'var(--text-2)', background: 'var(--surface-2)' }}
+                    >
+                      Ask about this territory
+                    </button>
+                  </div>
                 )}
               </article>
             )
           })}
 
-          <article
-            className="project-card rounded-3xl p-6"
-            style={{
-              background:
-                'linear-gradient(135deg, rgba(71,150,227,0.09), rgba(145,119,199,0.11), rgba(217,101,112,0.09))',
-              border: '1px solid rgba(145,119,199,0.25)',
-            }}
-          >
-            <Sparkle size={24} />
-            <h3 className="mt-4 text-base font-semibold tracking-tight">The Next Territory</h3>
-            <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>
-              Every weird analogy is a candidate structure. The flock is listening — throw the
-              boomerang and it will be caught.
-            </p>
-            <p className="mt-4 text-xs font-medium" style={{ color: '#9177c7' }}>
-              A goose is not always a goose.
-            </p>
-          </article>
+          {filter === 'all' && (
+            <article
+              className="project-card rounded-3xl p-6"
+              style={{
+                background:
+                  'linear-gradient(135deg, rgba(71,150,227,0.09), rgba(145,119,199,0.11), rgba(217,101,112,0.09))',
+                border: '1px solid rgba(145,119,199,0.25)',
+                ['--i' as string]: visibleTerritories.length,
+              }}
+            >
+              <Sparkle size={24} />
+              <h3 className="mt-4 text-base font-semibold tracking-tight">The Next Territory</h3>
+              <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>
+                Every weird analogy is a candidate structure. The flock is listening — throw the
+                boomerang and it will be caught.
+              </p>
+              <p className="mt-4 text-xs font-medium" style={{ color: '#9177c7' }}>
+                A goose is not always a goose.
+              </p>
+            </article>
+          )}
         </div>
 
-        {/* Live event stream */}
+        {visibleTerritories.length === 0 && (
+          <p className="mt-6 text-sm" style={{ color: 'var(--text-3)' }}>
+            No territories match this filter in the current reading.
+          </p>
+        )}
+
         {constellation.status && constellation.status.recent_event_kinds.length > 0 && (
           <div className="mt-6 rounded-3xl p-6" style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}>
             <h3 className="text-sm font-semibold tracking-tight" style={{ color: 'var(--text-2)' }}>
@@ -484,7 +701,6 @@ export default function Home() {
         )}
       </section>
 
-      {/* Doctrine */}
       <section className="relative z-10 mx-auto max-w-6xl px-6 py-24">
         <h2 className="mb-8 text-xl font-semibold tracking-tight">Doctrine, inherited</h2>
         <div className="grid gap-4 lg:grid-cols-3">
@@ -517,7 +733,6 @@ export default function Home() {
 /* Sub-components                                                       */
 /* ------------------------------------------------------------------ */
 
-/** Names where the stages on screen came from. Never let the UI imply more. */
 function LadderProvenance({
   source,
   notice,
@@ -544,6 +759,57 @@ function LadderProvenance({
   )
 }
 
+function LocalAnswerCard({
+  result,
+  pendingFlock,
+  flockNotice,
+}: {
+  result: LocalAskResult
+  pendingFlock: boolean
+  flockNotice: string | null
+}) {
+  return (
+    <div
+      className="answer-in mx-auto mt-6 max-w-2xl rounded-3xl p-6 text-left"
+      style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" style={{ fontFamily: MONO }}>
+        <span
+          className="rounded-full px-3 py-1"
+          style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--line)' }}
+        >
+          local reading
+        </span>
+        <span
+          className="rounded-full px-3 py-1"
+          style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--line)' }}
+        >
+          confidence {result.confidence.toFixed(2)}
+        </span>
+        {pendingFlock && (
+          <span className="sync-pulse" style={{ color: 'var(--text-3)' }}>
+            asking owner function…
+          </span>
+        )}
+      </div>
+      <p className="text-[15px] leading-relaxed" style={{ color: 'var(--text)' }}>
+        {result.answer}
+      </p>
+      {result.required_evidence && (
+        <p className="mt-4 text-xs leading-relaxed" style={{ color: 'var(--text-2)' }}>
+          <span style={{ color: 'var(--text-3)' }}>Required evidence — </span>
+          {result.required_evidence}
+        </p>
+      )}
+      {flockNotice && (
+        <p className="mt-3 text-xs" style={{ color: 'var(--text-3)' }}>
+          Owner function unavailable — {flockNotice} Local reading stands.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function AnswerCard({
   answer,
   routeState,
@@ -562,14 +828,16 @@ function AnswerCard({
 
   return (
     <div
-      className="mx-auto mt-6 max-w-2xl rounded-3xl p-6 text-left"
+      className="answer-in mx-auto mt-6 max-w-2xl rounded-3xl p-6 text-left"
       style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}
     >
-      <p className="text-[15px] leading-relaxed" style={{ color: 'var(--text)' }}>
-        {answer.answer}
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs" style={{ fontFamily: MONO }}>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" style={{ fontFamily: MONO }}>
+        <span
+          className="rounded-full px-3 py-1"
+          style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--line)' }}
+        >
+          flock
+        </span>
         <span
           className="rounded-full px-3 py-1"
           style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--line)' }}
@@ -592,6 +860,9 @@ function AnswerCard({
           </span>
         )}
       </div>
+      <p className="text-[15px] leading-relaxed" style={{ color: 'var(--text)' }}>
+        {answer.answer}
+      </p>
 
       {answer.required_evidence && (
         <p className="mt-4 text-xs leading-relaxed" style={{ color: 'var(--text-2)' }}>
