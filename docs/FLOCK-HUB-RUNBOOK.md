@@ -152,6 +152,10 @@ additionally call flock-ask; if that function 401s or 503s, the local reading
 stands and the UI says so. Route writes still cannot happen in the browser
 (§2).
 
+PostgREST driver text ("Unregistered API key", PGRST codes) must not appear
+on the provenance line. `humanizeControlPlaneError` maps those to a failure
+class; the raw string stays in the network tab.
+
 ---
 
 ## Deployment checklist (run from a machine that can reach Supabase)

@@ -111,6 +111,37 @@
     0 2px 8px -2px rgba(71, 150, 227, 0.18);
 }
 
+.command-input {
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.filter-row {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.filter-row::-webkit-scrollbar {
+  display: none;
+}
+
+.chip,
+.filter-chip,
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .project-card:hover {
+    transform: none;
+    box-shadow: var(--card-shadow);
+  }
+  .pointer-orb {
+    display: none;
+  }
+}
+
 /* Live pulse */
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(52, 168, 83, 0.35); }

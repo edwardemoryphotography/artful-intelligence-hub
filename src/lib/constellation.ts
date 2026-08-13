@@ -8,6 +8,7 @@
  */
 import { supabase } from './supabase'
 import { assertExposureContract, ExposureContractError } from './exposure'
+import { humanizeControlPlaneError } from './controlPlaneNotice'
 import type { ConstellationStatus, LadderPayload } from './ladder'
 
 export type ControlPlaneFailure =
@@ -41,7 +42,11 @@ async function callRpc<T>(fn: string): Promise<ControlPlaneResult<T>> {
   try {
     const { data, error } = await supabase.rpc(fn)
     if (error) {
-      return { ok: false, reason: classify(error), message: error.message }
+      return {
+        ok: false,
+        reason: classify(error),
+        message: humanizeControlPlaneError(error.message),
+      }
     }
     assertExposureContract(data)
     return { ok: true, data: data as T }
@@ -54,7 +59,7 @@ async function callRpc<T>(fn: string): Promise<ControlPlaneResult<T>> {
     return {
       ok: false,
       reason: 'unreachable',
-      message: err instanceof Error ? err.message : String(err),
+      message: humanizeControlPlaneError(err instanceof Error ? err.message : String(err)),
     }
   }
 }
