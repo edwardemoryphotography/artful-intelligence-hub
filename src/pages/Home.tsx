@@ -62,14 +62,16 @@ function Sparkle({ size = 28, className = '' }: { size?: number; className?: str
 }
 
 function TruthLadder({ stage, muted }: { stage: TruthStage; muted: boolean }) {
+  const current = TRUTH_LADDER[stage]
   return (
-    <div className="flex items-center gap-1.5" title={`Truth ladder: ${TRUTH_LADDER[stage]}`}>
-      {TRUTH_LADDER.map((label, i) => {
-        const reached = i <= stage
-        const isLive = stage === 3 && i === 3 && !muted
-        return (
-          <div key={label} className="flex items-center gap-1.5">
+    <div title={`Truth ladder: ${current}${muted ? ' (declared)' : ''}`}>
+      <div className="flex items-center gap-1.5 sm:hidden">
+        {TRUTH_LADDER.map((label, i) => {
+          const reached = i <= stage
+          const isLive = stage === 3 && i === 3 && !muted
+          return (
             <div
+              key={label}
               className={`h-1.5 w-1.5 rounded-full ${isLive ? 'live-pulse' : ''}`}
               style={{
                 backgroundColor: reached
@@ -80,16 +82,41 @@ function TruthLadder({ stage, muted }: { stage: TruthStage; muted: boolean }) {
                 opacity: reached && muted ? 0.55 : 1,
               }}
             />
-            <span
-              className="text-[10px] font-medium tracking-wide"
-              style={{ color: reached ? 'var(--text-2)' : 'var(--text-3)', opacity: muted ? 0.7 : 1 }}
-            >
-              {label}
-            </span>
-            {i < TRUTH_LADDER.length - 1 && <div className="h-px w-2" style={{ background: 'var(--line)' }} />}
-          </div>
-        )
-      })}
+          )
+        })}
+        <span className="text-[10px] font-medium tracking-wide" style={{ color: 'var(--text-2)' }}>
+          {current}
+          {muted ? ' · declared' : ''}
+        </span>
+      </div>
+      <div className="hidden items-center gap-1.5 sm:flex">
+        {TRUTH_LADDER.map((label, i) => {
+          const reached = i <= stage
+          const isLive = stage === 3 && i === 3 && !muted
+          return (
+            <div key={label} className="flex items-center gap-1.5">
+              <div
+                className={`h-1.5 w-1.5 rounded-full ${isLive ? 'live-pulse' : ''}`}
+                style={{
+                  backgroundColor: reached
+                    ? isLive
+                      ? '#34a853'
+                      : 'var(--ladder-reached)'
+                    : 'var(--line)',
+                  opacity: reached && muted ? 0.55 : 1,
+                }}
+              />
+              <span
+                className="text-[10px] font-medium tracking-wide"
+                style={{ color: reached ? 'var(--text-2)' : 'var(--text-3)', opacity: muted ? 0.7 : 1 }}
+              >
+                {label}
+              </span>
+              {i < TRUTH_LADDER.length - 1 && <div className="h-px w-2" style={{ background: 'var(--line)' }} />}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -143,7 +170,7 @@ export default function Home() {
   const [filter, setFilter] = useState<LadderFilter>('all')
   const [showLocalReading, setShowLocalReading] = useState(false)
 
-  const commandRef = useRef<HTMLInputElement>(null)
+  const commandRef = useRef<HTMLTextAreaElement>(null)
 
   const owner = useOwnerSession()
   const constellation = useConstellation(Boolean(owner.session))
@@ -152,6 +179,13 @@ export default function Home() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('flock-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    const el = commandRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [query])
 
   useEffect(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -333,6 +367,18 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-3">
           <div
+            className="flex items-center gap-2 sm:hidden"
+            title={constellation.notice ?? syncLabel}
+          >
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                constellation.sync === 'syncing' ? 'sync-pulse' : 'live-pulse'
+              }`}
+              style={{ background: syncColor }}
+              aria-label={syncLabel}
+            />
+          </div>
+          <div
             className="hidden items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium sm:flex"
             style={{ background: 'var(--surface-2)', backdropFilter: 'blur(8px)', color: syncColor }}
             title={constellation.notice ?? undefined}
@@ -427,11 +473,11 @@ export default function Home() {
         </div>
       )}
 
-      <section className="relative z-10 mx-auto max-w-3xl px-6 pt-20 text-center sm:pt-24">
-        <div className="mb-6 flex justify-center">
+      <section className="relative z-10 mx-auto max-w-3xl px-6 pt-10 text-center sm:pt-24">
+        <div className="mb-5 flex justify-center sm:mb-6">
           <Sparkle size={46} />
         </div>
-        <h1 className="text-4xl font-medium leading-tight tracking-tight sm:text-[3.4rem] sm:leading-[1.1]">
+        <h1 className="text-[1.85rem] font-medium leading-tight tracking-tight sm:text-[3.4rem] sm:leading-[1.1]">
           <span className="gemini-gradient font-semibold">{greeting()}.</span>
           <br />
           <span style={{ color: 'var(--text)' }}>One home for the whole flock.</span>
@@ -441,36 +487,38 @@ export default function Home() {
         </p>
 
         <div
-          className="command-bar mx-auto mt-10 flex items-center gap-3 rounded-[2rem] px-5 py-4"
+          className="command-bar mx-auto mt-8 flex flex-col gap-3 rounded-[1.5rem] px-4 py-3 sm:mt-10 sm:flex-row sm:items-end sm:rounded-[2rem] sm:px-5 sm:py-4"
           style={{ background: 'var(--surface)', boxShadow: 'var(--card-shadow)' }}
         >
-          <Sparkle size={20} className="shrink-0" />
-          <input
-            ref={commandRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleAsk()
-            }}
-            placeholder={
-              owner.session
-                ? 'Ask the flock anything…'
-                : 'Ask the constellation — local reading, no sign-in needed'
-            }
-            className="w-full bg-transparent text-base outline-none"
-            style={{ color: 'var(--text)' }}
-            aria-label="Ask the constellation"
-          />
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <Sparkle size={20} className="mt-1 shrink-0" />
+            <textarea
+              ref={commandRef}
+              rows={1}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  void handleAsk()
+                }
+              }}
+              placeholder={owner.session ? 'Ask the flock anything…' : 'Ask the constellation…'}
+              className="command-input w-full resize-none bg-transparent text-base leading-6 outline-none"
+              style={{ color: 'var(--text)' }}
+              aria-label="Ask the constellation"
+            />
+          </div>
           <button
             onClick={() => void handleAsk()}
             disabled={asking || !query.trim()}
-            className="shrink-0 rounded-full px-4 py-2 text-sm font-medium text-white transition-transform hover:scale-[1.03] disabled:opacity-50"
+            className="touch-manipulation self-end rounded-full px-4 py-2 text-sm font-medium text-white transition-transform hover:scale-[1.03] disabled:opacity-50 sm:self-auto"
             style={{ background: 'linear-gradient(90deg,#4796e3,#9177c7,#d96570)', backgroundSize: '200% auto' }}
           >
             {asking ? 'Thinking…' : 'Send'}
           </button>
         </div>
-        <p className="mt-3 text-[11px] tracking-wide" style={{ color: 'var(--text-3)', fontFamily: MONO }}>
+        <p className="kbd-hint mt-3 hidden text-[11px] tracking-wide md:block" style={{ color: 'var(--text-3)', fontFamily: MONO }}>
           / to focus · Enter to send · Esc to clear selection · chips adapt to the ladder
         </p>
 
@@ -542,14 +590,18 @@ export default function Home() {
               <LadderProvenance source={constellation.ladderSource} notice={constellation.notice} />
             </p>
           </div>
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter territories">
+          <div
+            className="filter-row -mx-6 flex gap-2 overflow-x-auto px-6 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+            role="tablist"
+            aria-label="Filter territories"
+          >
             {FILTERS.map((item) => (
               <button
                 key={item.id}
                 role="tab"
                 aria-selected={filter === item.id}
                 onClick={() => setFilter(item.id)}
-                className={`filter-chip rounded-full px-3 py-1.5 text-xs font-medium ${
+                className={`filter-chip shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${
                   filter === item.id ? 'is-active' : ''
                 }`}
                 style={{
