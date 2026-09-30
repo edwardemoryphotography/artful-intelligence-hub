@@ -156,6 +156,12 @@ PostgREST driver text ("Unregistered API key", PGRST codes) must not appear
 on the provenance line. `humanizeControlPlaneError` maps those to a failure
 class; the raw string stays in the network tab.
 
+Bare `does not exist` is not a missing RPC. Postgres uses that phrase for
+relations and columns too. Only PGRST202 / `could not find the function` /
+`function … does not exist` may claim the constellation function is not
+deployed. A function that ran and then hit an unapplied migration is a
+schema gap, not an undeployed RPC.
+
 ---
 
 ## Deployment checklist (run from a machine that can reach Supabase)

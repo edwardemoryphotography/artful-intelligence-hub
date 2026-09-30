@@ -8,7 +8,7 @@
  */
 import { supabase } from './supabase'
 import { assertExposureContract, ExposureContractError } from './exposure'
-import { humanizeControlPlaneError } from './controlPlaneNotice'
+import { humanizeControlPlaneError, isMissingRpcError } from './controlPlaneNotice'
 import type { ConstellationStatus, LadderPayload } from './ladder'
 
 export type ControlPlaneFailure =
@@ -30,11 +30,7 @@ export type ControlPlaneResult<T> =
  * fallback rather than claim the control plane is down.
  */
 function classify(error: { code?: string; message?: string }): ControlPlaneFailure {
-  const code = error.code ?? ''
-  const message = error.message ?? ''
-  if (code === 'PGRST202' || /could not find the function|does not exist/i.test(message)) {
-    return 'missing_function'
-  }
+  if (isMissingRpcError(error)) return 'missing_function'
   return 'unreachable'
 }
 
@@ -45,7 +41,7 @@ async function callRpc<T>(fn: string): Promise<ControlPlaneResult<T>> {
       return {
         ok: false,
         reason: classify(error),
-        message: humanizeControlPlaneError(error.message),
+        message: humanizeControlPlaneError(error.message, error.code),
       }
     }
     assertExposureContract(data)
